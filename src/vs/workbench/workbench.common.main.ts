@@ -71,6 +71,8 @@ import './services/editor/browser/editorResolverService.js';
 import './services/aiEmbeddingVector/common/aiEmbeddingVectorService.js';
 import './services/aiRelatedInformation/common/aiRelatedInformationService.js';
 import './services/aiSettingsSearch/common/aiSettingsSearchService.js';
+import './services/aiCore/common/aiCoreService.js';
+import './services/aiAssistant/common/aiAssistantService.js';
 import './services/history/browser/historyService.js';
 import './services/activity/browser/activityService.js';
 import './services/keybinding/browser/keybindingService.js';
@@ -207,6 +209,10 @@ import './contrib/speech/browser/speech.contribution.js';
 import './contrib/chat/browser/chat.contribution.js';
 import './contrib/inlineChat/browser/inlineChat.contribution.js';
 import './contrib/mcp/browser/mcp.contribution.js';
+
+// AI
+import './contrib/ai/browser/ai.contribution.js';
+import './contrib/aiPanel/browser/aiPanel.contribution.js';
 
 // Interactive
 import './contrib/interactive/browser/interactive.contribution.js';
