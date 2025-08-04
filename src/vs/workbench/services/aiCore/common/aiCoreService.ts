@@ -15,6 +15,10 @@ import { URI } from '../../../../base/common/uri.js';
 import { IPosition, Position } from '../../../../editor/common/core/position.js';
 import { IRange, Range } from '../../../../editor/common/core/range.js';
 
+// =============================================================================
+// Service Interface
+// =============================================================================
+
 export const IAiCoreService = createDecorator<IAiCoreService>('IAiCoreService');
 
 export interface IAiCoreService {
@@ -51,6 +55,10 @@ export interface IAiCoreService {
 	readonly onContextChanged: Event<AiContextChangeEvent>;
 }
 
+// =============================================================================
+// Provider Interfaces
+// =============================================================================
+
 export interface IAiProvider {
 	readonly id: string;
 	readonly name: string;
@@ -72,6 +80,10 @@ export interface ICodeEditProvider extends IAiProvider {
 	provideCodeEdit(request: AiCodeEditRequest, token: CancellationToken): Promise<AiCodeEditResult>;
 }
 
+// =============================================================================
+// Enums
+// =============================================================================
+
 export enum AiCapability {
 	CodeCompletion = 'codeCompletion',
 	Chat = 'chat',
@@ -85,6 +97,56 @@ export enum AiCapability {
 	PerformanceOptimization = 'performanceOptimization',
 	SecurityAnalysis = 'securityAnalysis'
 }
+
+export enum AiCompletionKind {
+	Function = 'function',
+	Variable = 'variable',
+	Class = 'class',
+	Interface = 'interface',
+	Import = 'import',
+	Method = 'method',
+	Property = 'property',
+	Parameter = 'parameter',
+	Type = 'type',
+	Keyword = 'keyword',
+	Snippet = 'snippet'
+}
+
+export enum AiEditKind {
+	Insert = 'insert',
+	Replace = 'replace',
+	Delete = 'delete',
+	Refactor = 'refactor'
+}
+
+export enum AiRefactoringType {
+	ExtractMethod = 'extractMethod',
+	ExtractVariable = 'extractVariable',
+	ExtractClass = 'extractClass',
+	Rename = 'rename',
+	Move = 'move',
+	Inline = 'inline',
+	Simplify = 'simplify'
+}
+
+export enum AiTestType {
+	Unit = 'unit',
+	Integration = 'integration',
+	E2E = 'e2e',
+	Performance = 'performance'
+}
+
+export enum AiDocumentationType {
+	Function = 'function',
+	Class = 'class',
+	Interface = 'interface',
+	Module = 'module',
+	API = 'api'
+}
+
+// =============================================================================
+// Context Interfaces
+// =============================================================================
 
 export interface AiContext {
 	workspace?: AiWorkspaceContext;
@@ -190,6 +252,10 @@ export interface AiSelectionContext {
 	language: string;
 }
 
+// =============================================================================
+// Result Interfaces
+// =============================================================================
+
 export interface AiCompletionResult {
 	completions: AiCompletion[];
 	metadata?: Record<string, any>;
@@ -201,20 +267,6 @@ export interface AiCompletion {
 	kind: AiCompletionKind;
 	score: number;
 	metadata?: Record<string, any>;
-}
-
-export enum AiCompletionKind {
-	Function = 'function',
-	Variable = 'variable',
-	Class = 'class',
-	Interface = 'interface',
-	Import = 'import',
-	Method = 'method',
-	Property = 'property',
-	Parameter = 'parameter',
-	Type = 'type',
-	Keyword = 'keyword',
-	Snippet = 'snippet'
 }
 
 export interface AiChatResponse {
@@ -257,13 +309,6 @@ export interface AiCodeEdit {
 	kind: AiEditKind;
 }
 
-export enum AiEditKind {
-	Insert = 'insert',
-	Replace = 'replace',
-	Delete = 'delete',
-	Refactor = 'refactor'
-}
-
 export interface AiExplanationResult {
 	explanation: string;
 	codeBlocks: AiCodeBlock[];
@@ -276,16 +321,6 @@ export interface AiRefactoringRequest {
 	range: IRange;
 	type: AiRefactoringType;
 	context: AiContext;
-}
-
-export enum AiRefactoringType {
-	ExtractMethod = 'extractMethod',
-	ExtractVariable = 'extractVariable',
-	ExtractClass = 'extractClass',
-	Rename = 'rename',
-	Move = 'move',
-	Inline = 'inline',
-	Simplify = 'simplify'
 }
 
 export interface AiRefactoringResult {
@@ -317,13 +352,6 @@ export interface AiTestGenerationRequest {
 	context: AiContext;
 }
 
-export enum AiTestType {
-	Unit = 'unit',
-	Integration = 'integration',
-	E2E = 'e2e',
-	Performance = 'performance'
-}
-
 export interface AiTestGenerationResult {
 	tests: AiTest[];
 	framework: string;
@@ -342,14 +370,6 @@ export interface AiDocumentationRequest {
 	range: IRange;
 	type: AiDocumentationType;
 	context: AiContext;
-}
-
-export enum AiDocumentationType {
-	Function = 'function',
-	Class = 'class',
-	Interface = 'interface',
-	Module = 'module',
-	API = 'api'
 }
 
 export interface AiDocumentationResult {
@@ -448,6 +468,10 @@ export interface AiSecurityRecommendation {
 	priority: 'high' | 'medium' | 'low';
 }
 
+// =============================================================================
+// Event Interfaces
+// =============================================================================
+
 export interface AiResponseEvent {
 	requestId: string;
 	type: string;
@@ -466,250 +490,126 @@ export interface AiContextChangeEvent {
 	data: any;
 }
 
-export class AiCoreService extends Disposable implements IAiCoreService {
-	readonly _serviceBrand: undefined;
+// =============================================================================
+// Utility Classes
+// =============================================================================
 
-	private readonly _providers: Map<string, IAiProvider> = new Map();
-	private readonly _completionProviders: ICodeCompletionProvider[] = [];
-	private readonly _chatProviders: IChatProvider[] = [];
-	private readonly _codeEditProviders: ICodeEditProvider[] = [];
+/**
+ * Manages AI providers registration and lifecycle
+ */
+class AiProviderManager extends Disposable {
+	private readonly providers: Map<string, IAiProvider> = new Map();
+	private readonly completionProviders: ICodeCompletionProvider[] = [];
+	private readonly chatProviders: IChatProvider[] = [];
+	private readonly codeEditProviders: ICodeEditProvider[] = [];
 
-	private readonly _onAiResponse = this._register(new Emitter<AiResponseEvent>());
-	readonly onAiResponse: Event<AiResponseEvent> = this._onAiResponse.event;
-
-	private readonly _onAiError = this._register(new Emitter<AiErrorEvent>());
-	readonly onAiError: Event<AiErrorEvent> = this._onAiError.event;
-
-	private readonly _onContextChanged = this._register(new Emitter<AiContextChangeEvent>());
-	readonly onContextChanged: Event<AiContextChangeEvent> = this._onContextChanged.event;
-
-	constructor(@ILogService private readonly logService: ILogService) {
+	constructor(private readonly logService: ILogService) {
 		super();
 	}
 
-	isEnabled(): boolean {
-		return this._providers.size > 0;
-	}
-
+	/**
+	 * Registers a general AI provider
+	 */
 	registerAiProvider(provider: IAiProvider): IDisposable {
-		this._providers.set(provider.id, provider);
-		this.logService.trace(`[AiCoreService] Registered AI provider: ${provider.name}`);
+		this.providers.set(provider.id, provider);
+		this.logService.trace(`[AiProviderManager] Registered AI provider: ${provider.name}`);
 		
 		return {
 			dispose: () => {
-				this._providers.delete(provider.id);
+				this.providers.delete(provider.id);
 				provider.dispose();
 			}
 		};
 	}
 
+	/**
+	 * Registers a code completion provider
+	 */
 	registerCodeCompletionProvider(provider: ICodeCompletionProvider): IDisposable {
-		this._completionProviders.push(provider);
-		this.logService.trace(`[AiCoreService] Registered code completion provider: ${provider.name}`);
+		this.completionProviders.push(provider);
+		this.logService.trace(`[AiProviderManager] Registered code completion provider: ${provider.name}`);
 		
 		return {
 			dispose: () => {
-				const index = this._completionProviders.indexOf(provider);
+				const index = this.completionProviders.indexOf(provider);
 				if (index >= 0) {
-					this._completionProviders.splice(index, 1);
+					this.completionProviders.splice(index, 1);
 				}
 			}
 		};
 	}
 
+	/**
+	 * Registers a chat provider
+	 */
 	registerChatProvider(provider: IChatProvider): IDisposable {
-		this._chatProviders.push(provider);
-		this.logService.trace(`[AiCoreService] Registered chat provider: ${provider.name}`);
+		this.chatProviders.push(provider);
+		this.logService.trace(`[AiProviderManager] Registered chat provider: ${provider.name}`);
 		
 		return {
 			dispose: () => {
-				const index = this._chatProviders.indexOf(provider);
+				const index = this.chatProviders.indexOf(provider);
 				if (index >= 0) {
-					this._chatProviders.splice(index, 1);
+					this.chatProviders.splice(index, 1);
 				}
 			}
 		};
 	}
 
+	/**
+	 * Registers a code edit provider
+	 */
 	registerCodeEditProvider(provider: ICodeEditProvider): IDisposable {
-		this._codeEditProviders.push(provider);
-		this.logService.trace(`[AiCoreService] Registered code edit provider: ${provider.name}`);
+		this.codeEditProviders.push(provider);
+		this.logService.trace(`[AiProviderManager] Registered code edit provider: ${provider.name}`);
 		
 		return {
 			dispose: () => {
-				const index = this._codeEditProviders.indexOf(provider);
+				const index = this.codeEditProviders.indexOf(provider);
 				if (index >= 0) {
-					this._codeEditProviders.splice(index, 1);
+					this.codeEditProviders.splice(index, 1);
 				}
 			}
 		};
 	}
 
-	async getCompletion(query: string, context: AiContext, token: CancellationToken): Promise<AiCompletionResult> {
-		const stopwatch = StopWatch.create();
-		const requestId = this.generateRequestId();
-
-		try {
-			if (this._completionProviders.length === 0) {
-				throw new Error('No code completion providers registered');
-			}
-
-			const results = await Promise.all(
-				this._completionProviders.map(provider =>
-					provider.provideCompletion(query, context, token)
-				)
-			);
-
-			const mergedResult = this.mergeCompletionResults(results);
-			
-			this._onAiResponse.fire({
-				requestId,
-				type: 'completion',
-				result: mergedResult,
-				duration: stopwatch.elapsed()
-			});
-
-			return mergedResult;
-		} catch (error) {
-			this._onAiError.fire({
-				requestId,
-				error: error as Error,
-				context: 'getCompletion'
-			});
-			throw error;
-		}
+	/**
+	 * Checks if any providers are registered
+	 */
+	isEnabled(): boolean {
+		return this.providers.size > 0;
 	}
 
-	async getChatResponse(message: string, context: AiContext, token: CancellationToken): Promise<AiChatResponse> {
-		const stopwatch = StopWatch.create();
-		const requestId = this.generateRequestId();
-
-		try {
-			if (this._chatProviders.length === 0) {
-				throw new Error('No chat providers registered');
-			}
-
-			const results = await Promise.all(
-				this._chatProviders.map(provider =>
-					provider.provideChatResponse(message, context, token)
-				)
-			);
-
-			const mergedResult = this.mergeChatResults(results);
-			
-			this._onAiResponse.fire({
-				requestId,
-				type: 'chat',
-				result: mergedResult,
-				duration: stopwatch.elapsed()
-			});
-
-			return mergedResult;
-		} catch (error) {
-			this._onAiError.fire({
-				requestId,
-				error: error as Error,
-				context: 'getChatResponse'
-			});
-			throw error;
-		}
+	/**
+	 * Gets all completion providers
+	 */
+	getCompletionProviders(): ICodeCompletionProvider[] {
+		return [...this.completionProviders];
 	}
 
-	async getCodeEdit(request: AiCodeEditRequest, token: CancellationToken): Promise<AiCodeEditResult> {
-		const stopwatch = StopWatch.create();
-		const requestId = this.generateRequestId();
-
-		try {
-			if (this._codeEditProviders.length === 0) {
-				throw new Error('No code edit providers registered');
-			}
-
-			const results = await Promise.all(
-				this._codeEditProviders.map(provider =>
-					provider.provideCodeEdit(request, token)
-				)
-			);
-
-			const mergedResult = this.mergeCodeEditResults(results);
-			
-			this._onAiResponse.fire({
-				requestId,
-				type: 'codeEdit',
-				result: mergedResult,
-				duration: stopwatch.elapsed()
-			});
-
-			return mergedResult;
-		} catch (error) {
-			this._onAiError.fire({
-				requestId,
-				error: error as Error,
-				context: 'getCodeEdit'
-			});
-			throw error;
-		}
+	/**
+	 * Gets all chat providers
+	 */
+	getChatProviders(): IChatProvider[] {
+		return [...this.chatProviders];
 	}
 
-	async getExplanation(code: string, context: AiContext, token: CancellationToken): Promise<AiExplanationResult> {
-		// Implementation for code explanation
-		throw new Error('Not implemented');
+	/**
+	 * Gets all code edit providers
+	 */
+	getCodeEditProviders(): ICodeEditProvider[] {
+		return [...this.codeEditProviders];
 	}
+}
 
-	async getRefactoring(request: AiRefactoringRequest, token: CancellationToken): Promise<AiRefactoringResult> {
-		// Implementation for code refactoring
-		throw new Error('Not implemented');
-	}
-
-	async getBugFix(request: AiBugFixRequest, token: CancellationToken): Promise<AiBugFixResult> {
-		// Implementation for bug fixing
-		throw new Error('Not implemented');
-	}
-
-	async getTestGeneration(request: AiTestGenerationRequest, token: CancellationToken): Promise<AiTestGenerationResult> {
-		// Implementation for test generation
-		throw new Error('Not implemented');
-	}
-
-	async getDocumentation(request: AiDocumentationRequest, token: CancellationToken): Promise<AiDocumentationResult> {
-		// Implementation for documentation generation
-		throw new Error('Not implemented');
-	}
-
-	async getCodeReview(request: AiCodeReviewRequest, token: CancellationToken): Promise<AiCodeReviewResult> {
-		// Implementation for code review
-		throw new Error('Not implemented');
-	}
-
-	async getPerformanceOptimization(request: AiPerformanceRequest, token: CancellationToken): Promise<AiPerformanceResult> {
-		// Implementation for performance optimization
-		throw new Error('Not implemented');
-	}
-
-	async getSecurityAnalysis(request: AiSecurityRequest, token: CancellationToken): Promise<AiSecurityResult> {
-		// Implementation for security analysis
-		throw new Error('Not implemented');
-	}
-
-	async getWorkspaceContext(): Promise<AiWorkspaceContext> {
-		// Implementation for workspace context
-		throw new Error('Not implemented');
-	}
-
-	async getFileContext(uri: URI): Promise<AiFileContext> {
-		// Implementation for file context
-		throw new Error('Not implemented');
-	}
-
-	async getSelectionContext(uri: URI, range: IRange): Promise<AiSelectionContext> {
-		// Implementation for selection context
-		throw new Error('Not implemented');
-	}
-
-	private generateRequestId(): string {
-		return `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-	}
-
-	private mergeCompletionResults(results: AiCompletionResult[]): AiCompletionResult {
+/**
+ * Handles result merging and deduplication
+ */
+class AiResultMerger {
+	/**
+	 * Merges multiple completion results into a single result
+	 */
+	static mergeCompletionResults(results: AiCompletionResult[]): AiCompletionResult {
 		const allCompletions: AiCompletion[] = [];
 		const metadata: Record<string, any> = {};
 
@@ -720,7 +620,6 @@ export class AiCoreService extends Disposable implements IAiCoreService {
 			}
 		}
 
-		// Sort by score and remove duplicates
 		const uniqueCompletions = this.deduplicateCompletions(allCompletions);
 		uniqueCompletions.sort((a, b) => b.score - a.score);
 
@@ -730,7 +629,10 @@ export class AiCoreService extends Disposable implements IAiCoreService {
 		};
 	}
 
-	private mergeChatResults(results: AiChatResponse[]): AiChatResponse {
+	/**
+	 * Merges multiple chat results into a single result
+	 */
+	static mergeChatResults(results: AiChatResponse[]): AiChatResponse {
 		const allCodeBlocks: AiCodeBlock[] = [];
 		const allSuggestions: string[] = [];
 		const metadata: Record<string, any> = {};
@@ -751,7 +653,10 @@ export class AiCoreService extends Disposable implements IAiCoreService {
 		};
 	}
 
-	private mergeCodeEditResults(results: AiCodeEditResult[]): AiCodeEditResult {
+	/**
+	 * Merges multiple code edit results into a single result
+	 */
+	static mergeCodeEditResults(results: AiCodeEditResult[]): AiCodeEditResult {
 		const allEdits: AiCodeEdit[] = [];
 		const metadata: Record<string, any> = {};
 
@@ -769,7 +674,10 @@ export class AiCoreService extends Disposable implements IAiCoreService {
 		};
 	}
 
-	private deduplicateCompletions(completions: AiCompletion[]): AiCompletion[] {
+	/**
+	 * Removes duplicate completions based on text and position
+	 */
+	private static deduplicateCompletions(completions: AiCompletion[]): AiCompletion[] {
 		const seen = new Set<string>();
 		return completions.filter(completion => {
 			const key = `${completion.text}-${completion.range.startLineNumber}-${completion.range.startColumn}`;
@@ -782,4 +690,262 @@ export class AiCoreService extends Disposable implements IAiCoreService {
 	}
 }
 
+/**
+ * Generates unique request IDs for tracking
+ */
+class RequestIdGenerator {
+	private static counter = 0;
+
+	static generate(): string {
+		return `ai-${Date.now()}-${this.counter++}-${Math.random().toString(36).substr(2, 9)}`;
+	}
+}
+
+// =============================================================================
+// Main Service Implementation
+// =============================================================================
+
+/**
+ * Core AI service that orchestrates all AI functionalities
+ * Provides a unified interface for code completion, chat, and code editing
+ */
+export class AiCoreService extends Disposable implements IAiCoreService {
+	readonly _serviceBrand: undefined;
+
+	private readonly providerManager: AiProviderManager;
+	private readonly requestIdGenerator = RequestIdGenerator;
+
+	// Events
+	private readonly _onAiResponse = this._register(new Emitter<AiResponseEvent>());
+	readonly onAiResponse: Event<AiResponseEvent> = this._onAiResponse.event;
+
+	private readonly _onAiError = this._register(new Emitter<AiErrorEvent>());
+	readonly onAiError: Event<AiErrorEvent> = this._onAiError.event;
+
+	private readonly _onContextChanged = this._register(new Emitter<AiContextChangeEvent>());
+	readonly onContextChanged: Event<AiContextChangeEvent> = this._onContextChanged.event;
+
+	constructor(@ILogService private readonly logService: ILogService) {
+		super();
+		this.providerManager = this._register(new AiProviderManager(logService));
+	}
+
+	// =============================================================================
+	// Public Interface Methods
+	// =============================================================================
+
+	/**
+	 * Checks if AI functionality is enabled
+	 */
+	isEnabled(): boolean {
+		return this.providerManager.isEnabled();
+	}
+
+	/**
+	 * Registers a general AI provider
+	 */
+	registerAiProvider(provider: IAiProvider): IDisposable {
+		return this.providerManager.registerAiProvider(provider);
+	}
+
+	/**
+	 * Registers a code completion provider
+	 */
+	registerCodeCompletionProvider(provider: ICodeCompletionProvider): IDisposable {
+		return this.providerManager.registerCodeCompletionProvider(provider);
+	}
+
+	/**
+	 * Registers a chat provider
+	 */
+	registerChatProvider(provider: IChatProvider): IDisposable {
+		return this.providerManager.registerChatProvider(provider);
+	}
+
+	/**
+	 * Registers a code edit provider
+	 */
+	registerCodeEditProvider(provider: ICodeEditProvider): IDisposable {
+		return this.providerManager.registerCodeEditProvider(provider);
+	}
+
+	// =============================================================================
+	// AI Operation Methods
+	// =============================================================================
+
+	/**
+	 * Gets code completions from all registered providers
+	 */
+	async getCompletion(query: string, context: AiContext, token: CancellationToken): Promise<AiCompletionResult> {
+		const stopwatch = StopWatch.create();
+		const requestId = this.requestIdGenerator.generate();
+
+		try {
+			this.validateProvidersExist('completion');
+			const providers = this.providerManager.getCompletionProviders();
+			const results = await this.executeWithProviders(providers, provider => 
+				provider.provideCompletion(query, context, token)
+			);
+			const mergedResult = AiResultMerger.mergeCompletionResults(results);
+			
+			this.fireResponseEvent(requestId, 'completion', mergedResult, stopwatch.elapsed());
+			return mergedResult;
+		} catch (error) {
+			this.fireErrorEvent(requestId, error as Error, 'getCompletion');
+			throw error;
+		}
+	}
+
+	/**
+	 * Gets chat responses from all registered providers
+	 */
+	async getChatResponse(message: string, context: AiContext, token: CancellationToken): Promise<AiChatResponse> {
+		const stopwatch = StopWatch.create();
+		const requestId = this.requestIdGenerator.generate();
+
+		try {
+			this.validateProvidersExist('chat');
+			const providers = this.providerManager.getChatProviders();
+			const results = await this.executeWithProviders(providers, provider => 
+				provider.provideChatResponse(message, context, token)
+			);
+			const mergedResult = AiResultMerger.mergeChatResults(results);
+			
+			this.fireResponseEvent(requestId, 'chat', mergedResult, stopwatch.elapsed());
+			return mergedResult;
+		} catch (error) {
+			this.fireErrorEvent(requestId, error as Error, 'getChatResponse');
+			throw error;
+		}
+	}
+
+	/**
+	 * Gets code edits from all registered providers
+	 */
+	async getCodeEdit(request: AiCodeEditRequest, token: CancellationToken): Promise<AiCodeEditResult> {
+		const stopwatch = StopWatch.create();
+		const requestId = this.requestIdGenerator.generate();
+
+		try {
+			this.validateProvidersExist('code edit');
+			const providers = this.providerManager.getCodeEditProviders();
+			const results = await this.executeWithProviders(providers, provider => 
+				provider.provideCodeEdit(request, token)
+			);
+			const mergedResult = AiResultMerger.mergeCodeEditResults(results);
+			
+			this.fireResponseEvent(requestId, 'codeEdit', mergedResult, stopwatch.elapsed());
+			return mergedResult;
+		} catch (error) {
+			this.fireErrorEvent(requestId, error as Error, 'getCodeEdit');
+			throw error;
+		}
+	}
+
+	// =============================================================================
+	// Unimplemented Methods (Placeholders)
+	// =============================================================================
+
+	async getExplanation(code: string, context: AiContext, token: CancellationToken): Promise<AiExplanationResult> {
+		throw new Error('Code explanation not implemented');
+	}
+
+	async getRefactoring(request: AiRefactoringRequest, token: CancellationToken): Promise<AiRefactoringResult> {
+		throw new Error('Code refactoring not implemented');
+	}
+
+	async getBugFix(request: AiBugFixRequest, token: CancellationToken): Promise<AiBugFixResult> {
+		throw new Error('Bug fixing not implemented');
+	}
+
+	async getTestGeneration(request: AiTestGenerationRequest, token: CancellationToken): Promise<AiTestGenerationResult> {
+		throw new Error('Test generation not implemented');
+	}
+
+	async getDocumentation(request: AiDocumentationRequest, token: CancellationToken): Promise<AiDocumentationResult> {
+		throw new Error('Documentation generation not implemented');
+	}
+
+	async getCodeReview(request: AiCodeReviewRequest, token: CancellationToken): Promise<AiCodeReviewResult> {
+		throw new Error('Code review not implemented');
+	}
+
+	async getPerformanceOptimization(request: AiPerformanceRequest, token: CancellationToken): Promise<AiPerformanceResult> {
+		throw new Error('Performance optimization not implemented');
+	}
+
+	async getSecurityAnalysis(request: AiSecurityRequest, token: CancellationToken): Promise<AiSecurityResult> {
+		throw new Error('Security analysis not implemented');
+	}
+
+	async getWorkspaceContext(): Promise<AiWorkspaceContext> {
+		throw new Error('Workspace context not implemented');
+	}
+
+	async getFileContext(uri: URI): Promise<AiFileContext> {
+		throw new Error('File context not implemented');
+	}
+
+	async getSelectionContext(uri: URI, range: IRange): Promise<AiSelectionContext> {
+		throw new Error('Selection context not implemented');
+	}
+
+	// =============================================================================
+	// Private Helper Methods
+	// =============================================================================
+
+	/**
+	 * Validates that providers exist for the given operation type
+	 */
+	private validateProvidersExist(operationType: string): void {
+		const hasProviders = this.providerManager.isEnabled();
+		if (!hasProviders) {
+			throw new Error(`No AI providers registered for ${operationType}`);
+		}
+	}
+
+	/**
+	 * Executes operations with multiple providers and handles errors gracefully
+	 */
+	private async executeWithProviders<T>(
+		providers: any[],
+		operation: (provider: any) => Promise<T>
+	): Promise<T[]> {
+		const promises = providers.map(async (provider) => {
+			try {
+				return await operation(provider);
+			} catch (error) {
+				this.logService.warn(`[AiCoreService] Provider ${provider.name} failed:`, error);
+				throw error;
+			}
+		});
+
+		return Promise.all(promises);
+	}
+
+	/**
+	 * Fires a response event with the given data
+	 */
+	private fireResponseEvent(requestId: string, type: string, result: any, duration: number): void {
+		this._onAiResponse.fire({
+			requestId,
+			type,
+			result,
+			duration
+		});
+	}
+
+	/**
+	 * Fires an error event with the given error
+	 */
+	private fireErrorEvent(requestId: string, error: Error, context: string): void {
+		this._onAiError.fire({
+			requestId,
+			error,
+			context
+		});
+	}
+}
+
+// Register the service
 registerSingleton(IAiCoreService, AiCoreService, InstantiationType.Delayed);

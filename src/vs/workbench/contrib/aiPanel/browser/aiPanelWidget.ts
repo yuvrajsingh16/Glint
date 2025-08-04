@@ -21,6 +21,10 @@ import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { StopWatch } from '../../../../base/common/stopwatch.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 
+// =============================================================================
+// Service Interface
+// =============================================================================
+
 export const IAiPanelService = createDecorator<IAiPanelService>('IAiPanelService');
 
 export interface IAiPanelService {
@@ -52,6 +56,10 @@ export interface IAiPanelService {
 	readonly onError: Event<AiPanelError>;
 }
 
+// =============================================================================
+// Data Interfaces
+// =============================================================================
+
 export interface AiPanelResponse {
 	type: 'chat' | 'explain' | 'refactor' | 'fix' | 'test' | 'review' | 'performance' | 'security';
 	content: string;
@@ -76,15 +84,475 @@ export interface AiPanelOptions {
 	enableVoice?: boolean;
 }
 
+export interface AiPanelMessage {
+	type: 'user' | 'assistant';
+	content: string;
+	timestamp: number;
+}
+
+// =============================================================================
+// Utility Classes
+// =============================================================================
+
+/**
+ * Manages the AI panel's visual state and DOM elements
+ */
+class AiPanelRenderer extends Disposable {
+	private container: HTMLElement | undefined;
+	private readonly options: AiPanelOptions;
+
+	constructor(options: AiPanelOptions = {}) {
+		super();
+		this.options = options;
+	}
+
+	/**
+	 * Creates the main panel container
+	 */
+	createPanel(): HTMLElement {
+		if (this.container) {
+			return this.container;
+		}
+
+		this.container = document.createElement('div');
+		this.container.className = 'ai-panel';
+		this.applyPanelStyles();
+
+		document.body.appendChild(this.container);
+		return this.container;
+	}
+
+	/**
+	 * Destroys the panel container
+	 */
+	destroyPanel(): void {
+		if (this.container) {
+			this.container.remove();
+			this.container = undefined;
+		}
+	}
+
+	/**
+	 * Creates the panel header
+	 */
+	createHeader(onClose: () => void): HTMLElement {
+		const header = document.createElement('div');
+		header.className = 'ai-panel-header';
+		this.applyHeaderStyles(header);
+
+		const title = this.createHeaderTitle();
+		const closeButton = this.createCloseButton(onClose);
+
+		header.appendChild(title);
+		header.appendChild(closeButton);
+		return header;
+	}
+
+	/**
+	 * Creates the panel content area
+	 */
+	createContent(): HTMLElement {
+		const content = document.createElement('div');
+		content.className = 'ai-panel-content';
+		this.applyContentStyles(content);
+		return content;
+	}
+
+	/**
+	 * Creates the panel input area
+	 */
+	createInput(onSend: (message: string) => void, onClear: () => void): HTMLElement {
+		const inputContainer = document.createElement('div');
+		inputContainer.className = 'ai-panel-input';
+		this.applyInputContainerStyles(inputContainer);
+
+		const input = this.createTextArea();
+		const buttonContainer = this.createButtonContainer(input, onSend, onClear);
+
+		inputContainer.appendChild(input);
+		inputContainer.appendChild(buttonContainer);
+		return inputContainer;
+	}
+
+	/**
+	 * Creates a message element
+	 */
+	createMessageElement(message: AiPanelMessage): HTMLElement {
+		const messageContainer = document.createElement('div');
+		messageContainer.className = `ai-message ai-message-${message.type}`;
+		this.applyMessageStyles(messageContainer, message.type);
+
+		const content = this.createMessageContent(message.content);
+		const timestamp = this.createMessageTimestamp(message.timestamp);
+
+		messageContainer.appendChild(content);
+		messageContainer.appendChild(timestamp);
+
+		return messageContainer;
+	}
+
+	/**
+	 * Creates a loading indicator
+	 */
+	createLoadingIndicator(): HTMLElement {
+		const loading = document.createElement('div');
+		loading.className = 'ai-loading';
+		loading.innerHTML = `
+			<div style="display: flex; align-items: center; gap: 8px; padding: 10px;">
+				<div style="width: 16px; height: 16px; border: 2px solid var(--vscode-progressBar-background); border-top: 2px solid transparent; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+				<span>AI is thinking...</span>
+			</div>
+		`;
+		this.applyLoadingStyles(loading);
+		return loading;
+	}
+
+	/**
+	 * Updates the message history display
+	 */
+	updateMessageHistory(container: HTMLElement, messages: AiPanelMessage[]): void {
+		container.innerHTML = '';
+		messages.forEach(message => {
+			const messageElement = this.createMessageElement(message);
+			container.appendChild(messageElement);
+		});
+		container.scrollTop = container.scrollHeight;
+	}
+
+	/**
+	 * Updates the loading state
+	 */
+	updateLoadingState(container: HTMLElement, isLoading: boolean): void {
+		const existingLoading = container.querySelector('.ai-loading');
+		
+		if (isLoading && !existingLoading) {
+			const loading = this.createLoadingIndicator();
+			container.appendChild(loading);
+		} else if (!isLoading && existingLoading) {
+			existingLoading.remove();
+		}
+	}
+
+	// =============================================================================
+	// Private Helper Methods
+	// =============================================================================
+
+	private applyPanelStyles(): void {
+		if (!this.container) return;
+		
+		this.container.style.cssText = `
+			position: fixed;
+			top: 0;
+			right: 0;
+			width: ${this.options.size || 400}px;
+			height: 100vh;
+			background: var(--vscode-panel-background);
+			border-left: 1px solid var(--vscode-panel-border);
+			z-index: 1000;
+			display: flex;
+			flex-direction: column;
+			font-family: var(--vscode-font-family);
+			font-size: var(--vscode-font-size);
+		`;
+	}
+
+	private applyHeaderStyles(header: HTMLElement): void {
+		header.style.cssText = `
+			padding: 10px 15px;
+			border-bottom: 1px solid var(--vscode-panel-border);
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			background: var(--vscode-panel-background);
+		`;
+	}
+
+	private createHeaderTitle(): HTMLElement {
+		const title = document.createElement('h3');
+		title.textContent = 'AI Assistant';
+		title.style.cssText = `
+			margin: 0;
+			color: var(--vscode-foreground);
+			font-size: 14px;
+			font-weight: 600;
+		`;
+		return title;
+	}
+
+	private createCloseButton(onClose: () => void): HTMLElement {
+		const closeButton = document.createElement('button');
+		closeButton.innerHTML = '✕';
+		closeButton.style.cssText = `
+			background: none;
+			border: none;
+			color: var(--vscode-foreground);
+			cursor: pointer;
+			font-size: 16px;
+			padding: 0;
+			width: 24px;
+			height: 24px;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+		`;
+		closeButton.onclick = onClose;
+		return closeButton;
+	}
+
+	private applyContentStyles(content: HTMLElement): void {
+		content.style.cssText = `
+			flex: 1;
+			overflow-y: auto;
+			padding: 15px;
+			display: flex;
+			flex-direction: column;
+			gap: 15px;
+		`;
+	}
+
+	private applyInputContainerStyles(container: HTMLElement): void {
+		container.style.cssText = `
+			padding: 15px;
+			border-top: 1px solid var(--vscode-panel-border);
+			background: var(--vscode-panel-background);
+		`;
+	}
+
+	private createTextArea(): HTMLTextAreaElement {
+		const input = document.createElement('textarea');
+		input.placeholder = 'Ask me anything about your code...';
+		input.style.cssText = `
+			width: 100%;
+			min-height: 60px;
+			padding: 8px 12px;
+			border: 1px solid var(--vscode-input-border);
+			border-radius: 4px;
+			background: var(--vscode-input-background);
+			color: var(--vscode-input-foreground);
+			font-family: inherit;
+			font-size: inherit;
+			resize: vertical;
+			outline: none;
+		`;
+		return input;
+	}
+
+	private createButtonContainer(input: HTMLTextAreaElement, onSend: (message: string) => void, onClear: () => void): HTMLElement {
+		const buttonContainer = document.createElement('div');
+		buttonContainer.style.cssText = `
+			display: flex;
+			gap: 8px;
+			margin-top: 8px;
+		`;
+
+		const sendButton = this.createButton('Send', 'primary', () => {
+			onSend(input.value);
+			input.value = '';
+		});
+
+		const clearButton = this.createButton('Clear', 'secondary', onClear);
+
+		buttonContainer.appendChild(sendButton);
+		buttonContainer.appendChild(clearButton);
+		return buttonContainer;
+	}
+
+	private createButton(text: string, type: 'primary' | 'secondary', onClick: () => void): HTMLElement {
+		const button = document.createElement('button');
+		button.textContent = text;
+		
+		const baseStyles = `
+			padding: 6px 12px;
+			border: none;
+			border-radius: 4px;
+			cursor: pointer;
+			font-size: inherit;
+		`;
+
+		if (type === 'primary') {
+			button.style.cssText = baseStyles + `
+				background: var(--vscode-button-background);
+				color: var(--vscode-button-foreground);
+			`;
+		} else {
+			button.style.cssText = baseStyles + `
+				background: var(--vscode-button-secondaryBackground);
+				color: var(--vscode-button-secondaryForeground);
+			`;
+		}
+
+		button.onclick = onClick;
+		return button;
+	}
+
+	private applyMessageStyles(container: HTMLElement, type: 'user' | 'assistant'): void {
+		const baseStyles = `
+			padding: 10px;
+			border-radius: 8px;
+			margin-bottom: 10px;
+			max-width: 100%;
+			word-wrap: break-word;
+		`;
+
+		if (type === 'user') {
+			container.style.cssText = baseStyles + `
+				background: var(--vscode-button-background);
+				color: var(--vscode-button-foreground);
+				margin-left: 20px;
+			`;
+		} else {
+			container.style.cssText = baseStyles + `
+				background: var(--vscode-editor-background);
+				color: var(--vscode-foreground);
+				border: 1px solid var(--vscode-panel-border);
+				margin-right: 20px;
+			`;
+		}
+	}
+
+	private createMessageContent(content: string): HTMLElement {
+		const contentElement = document.createElement('div');
+		contentElement.innerHTML = this.formatMessageContent(content);
+		contentElement.style.cssText = `
+			line-height: 1.4;
+			white-space: pre-wrap;
+		`;
+		return contentElement;
+	}
+
+	private createMessageTimestamp(timestamp: number): HTMLElement {
+		const timestampElement = document.createElement('div');
+		timestampElement.textContent = new Date(timestamp).toLocaleTimeString();
+		timestampElement.style.cssText = `
+			font-size: 11px;
+			color: var(--vscode-descriptionForeground);
+			margin-top: 4px;
+			text-align: right;
+		`;
+		return timestampElement;
+	}
+
+	private applyLoadingStyles(loading: HTMLElement): void {
+		loading.style.cssText = `
+			background: var(--vscode-editor-background);
+			border: 1px solid var(--vscode-panel-border);
+			border-radius: 8px;
+			margin: 10px 0;
+		`;
+	}
+
+	private formatMessageContent(content: string): string {
+		// Simple markdown-like formatting
+		return content
+			.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+			.replace(/\*(.*?)\*/g, '<em>$1</em>')
+			.replace(/`(.*?)`/g, '<code>$1</code>')
+			.replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+	}
+}
+
+/**
+ * Manages AI operations and their execution
+ */
+class AiOperationManager {
+	constructor(
+		private readonly aiAssistantService: IAiAssistantService,
+		private readonly logService: ILogService,
+		private readonly onResponse: (response: AiPanelResponse) => void,
+		private readonly onError: (error: AiPanelError) => void
+	) {}
+
+	/**
+	 * Executes an AI operation with consistent error handling
+	 */
+	async executeOperation<T>(
+		operationType: string,
+		operation: () => Promise<T>,
+		userMessage: string,
+		formatResponse: (result: T) => AiPanelResponse
+	): Promise<void> {
+		const stopwatch = StopWatch.create();
+
+		try {
+			const result = await operation();
+			const response = formatResponse(result);
+			response.duration = stopwatch.elapsed();
+			
+			this.onResponse(response);
+		} catch (error) {
+			this.handleError(operationType, error as Error);
+		}
+	}
+
+	/**
+	 * Handles errors from AI operations
+	 */
+	private handleError(context: string, error: Error): void {
+		this.logService.error(`[AiOperationManager] Error in ${context}:`, error);
+		
+		this.onError({
+			message: error.message,
+			context,
+			timestamp: Date.now()
+		});
+	}
+}
+
+/**
+ * Manages message history and state
+ */
+class MessageHistoryManager {
+	private messages: AiPanelMessage[] = [];
+
+	/**
+	 * Adds a message to the history
+	 */
+	addMessage(message: AiPanelMessage): void {
+		this.messages.push(message);
+	}
+
+	/**
+	 * Gets all messages
+	 */
+	getMessages(): AiPanelMessage[] {
+		return [...this.messages];
+	}
+
+	/**
+	 * Clears the message history
+	 */
+	clearHistory(): void {
+		this.messages = [];
+	}
+
+	/**
+	 * Gets the number of messages
+	 */
+	getMessageCount(): number {
+		return this.messages.length;
+	}
+}
+
+// =============================================================================
+// Main Service Implementation
+// =============================================================================
+
+/**
+ * AI Panel Widget that provides a chat interface for AI interactions
+ * Similar to Cursor's AI chat panel with modern UI and functionality
+ */
 export class AiPanelWidget extends Disposable implements IAiPanelService {
 	readonly _serviceBrand: undefined;
 
-	private _container: HTMLElement | undefined;
-	private _isVisible: boolean = false;
-	private _isLoading: boolean = false;
-	private _messageHistory: AiPanelMessage[] = [];
-	private _currentRequestId: string | undefined;
+	private isVisible: boolean = false;
+	private isLoading: boolean = false;
+	private currentRequestId: string | undefined;
 
+	private readonly renderer: AiPanelRenderer;
+	private readonly operationManager: AiOperationManager;
+	private readonly messageHistory: MessageHistoryManager;
+
+	// Events
 	private readonly _onPanelVisibilityChanged = this._register(new Emitter<boolean>());
 	readonly onPanelVisibilityChanged: Event<boolean> = this._onPanelVisibilityChanged.event;
 
@@ -110,680 +578,388 @@ export class AiPanelWidget extends Disposable implements IAiPanelService {
 	) {
 		super();
 
+		this.renderer = this._register(new AiPanelRenderer(options));
+		this.messageHistory = new MessageHistoryManager();
+		this.operationManager = new AiOperationManager(
+			this.aiAssistantService,
+			this.logService,
+			(response) => this._onResponseReceived.fire(response),
+			(error) => this._onError.fire(error)
+		);
+
 		this._register(this.aiAssistantService.onAssistantResponse(this.handleAssistantResponse, this));
 		this._register(this.aiAssistantService.onAssistantError(this.handleAssistantError, this));
 	}
 
+	// =============================================================================
+	// Panel Management
+	// =============================================================================
+
+	/**
+	 * Shows the AI panel
+	 */
 	showPanel(): void {
-		if (this._isVisible) {
+		if (this.isVisible) {
 			return;
 		}
 
-		this._isVisible = true;
+		this.isVisible = true;
 		this.createPanel();
 		this._onPanelVisibilityChanged.fire(true);
 	}
 
+	/**
+	 * Hides the AI panel
+	 */
 	hidePanel(): void {
-		if (!this._isVisible) {
+		if (!this.isVisible) {
 			return;
 		}
 
-		this._isVisible = false;
-		this.destroyPanel();
+		this.isVisible = false;
+		this.renderer.destroyPanel();
 		this._onPanelVisibilityChanged.fire(false);
 	}
 
+	/**
+	 * Toggles the AI panel visibility
+	 */
 	togglePanel(): void {
-		if (this._isVisible) {
+		if (this.isVisible) {
 			this.hidePanel();
 		} else {
 			this.showPanel();
 		}
 	}
 
+	/**
+	 * Checks if the panel is visible
+	 */
 	isVisible(): boolean {
-		return this._isVisible;
+		return this.isVisible;
 	}
 
+	// =============================================================================
+	// AI Operations
+	// =============================================================================
+
+	/**
+	 * Explains the given code
+	 */
 	async explainCode(code: string): Promise<void> {
-		if (this._isLoading) {
-			return;
-		}
+		if (this.isLoading) return;
 
-		this._isLoading = true;
-		this.updateLoadingState();
+		this.setLoadingState(true);
+		this.addUserMessage(`Explain this code:\n\n${code}`);
 
-		try {
-			const stopwatch = StopWatch.create();
-			const explanation = await this.aiAssistantService.explainCode(code);
-			
-			const response: AiPanelResponse = {
+		await this.operationManager.executeOperation(
+			'explainCode',
+			() => this.aiAssistantService.explainCode(code),
+			`Explain this code:\n\n${code}`,
+			(explanation) => ({
 				type: 'explain',
 				content: explanation,
 				codeBlocks: [],
 				suggestions: [],
 				timestamp: Date.now(),
-				duration: stopwatch.elapsed()
-			};
+				duration: 0
+			})
+		);
 
-			this.addMessage({
-				type: 'user',
-				content: `Explain this code:\n\n${code}`,
-				timestamp: Date.now()
-			});
-
-			this.addMessage({
-				type: 'assistant',
-				content: explanation,
-				timestamp: Date.now()
-			});
-
-			this._onResponseReceived.fire(response);
-		} catch (error) {
-			this.handleError('explainCode', error as Error);
-		} finally {
-			this._isLoading = false;
-			this.updateLoadingState();
-		}
+		this.setLoadingState(false);
 	}
 
+	/**
+	 * Refactors code according to the given instruction
+	 */
 	async refactorCode(code: string, instruction: string): Promise<void> {
-		if (this._isLoading) {
-			return;
-		}
+		if (this.isLoading) return;
 
-		this._isLoading = true;
-		this.updateLoadingState();
+		this.setLoadingState(true);
+		this.addUserMessage(`Refactor this code: ${instruction}\n\n${code}`);
 
-		try {
-			const stopwatch = StopWatch.create();
-			const refactoredCode = await this.aiAssistantService.refactorCode(code, instruction);
-			
-			const response: AiPanelResponse = {
+		await this.operationManager.executeOperation(
+			'refactorCode',
+			() => this.aiAssistantService.refactorCode(code, instruction),
+			`Refactor this code: ${instruction}\n\n${code}`,
+			(refactoredCode) => ({
 				type: 'refactor',
 				content: refactoredCode,
 				codeBlocks: [refactoredCode],
 				suggestions: [],
 				timestamp: Date.now(),
-				duration: stopwatch.elapsed()
-			};
+				duration: 0
+			})
+		);
 
-			this.addMessage({
-				type: 'user',
-				content: `Refactor this code: ${instruction}\n\n${code}`,
-				timestamp: Date.now()
-			});
-
-			this.addMessage({
-				type: 'assistant',
-				content: refactoredCode,
-				timestamp: Date.now()
-			});
-
-			this._onResponseReceived.fire(response);
-		} catch (error) {
-			this.handleError('refactorCode', error as Error);
-		} finally {
-			this._isLoading = false;
-			this.updateLoadingState();
-		}
+		this.setLoadingState(false);
 	}
 
+	/**
+	 * Fixes bugs in the given code
+	 */
 	async fixBug(code: string, error?: string): Promise<void> {
-		if (this._isLoading) {
-			return;
-		}
+		if (this.isLoading) return;
 
-		this._isLoading = true;
-		this.updateLoadingState();
+		this.setLoadingState(true);
+		this.addUserMessage(`Fix this bug${error ? `: ${error}` : ''}\n\n${code}`);
 
-		try {
-			const stopwatch = StopWatch.create();
-			const fixedCode = await this.aiAssistantService.fixBug(code, error);
-			
-			const response: AiPanelResponse = {
+		await this.operationManager.executeOperation(
+			'fixBug',
+			() => this.aiAssistantService.fixBug(code, error),
+			`Fix this bug${error ? `: ${error}` : ''}\n\n${code}`,
+			(fixedCode) => ({
 				type: 'fix',
 				content: fixedCode,
 				codeBlocks: [fixedCode],
 				suggestions: [],
 				timestamp: Date.now(),
-				duration: stopwatch.elapsed()
-			};
+				duration: 0
+			})
+		);
 
-			this.addMessage({
-				type: 'user',
-				content: `Fix this bug${error ? `: ${error}` : ''}\n\n${code}`,
-				timestamp: Date.now()
-			});
-
-			this.addMessage({
-				type: 'assistant',
-				content: fixedCode,
-				timestamp: Date.now()
-			});
-
-			this._onResponseReceived.fire(response);
-		} catch (error) {
-			this.handleError('fixBug', error as Error);
-		} finally {
-			this._isLoading = false;
-			this.updateLoadingState();
-		}
+		this.setLoadingState(false);
 	}
 
+	/**
+	 * Generates tests for the given code
+	 */
 	async generateTests(code: string, framework?: string): Promise<void> {
-		if (this._isLoading) {
-			return;
-		}
+		if (this.isLoading) return;
 
-		this._isLoading = true;
-		this.updateLoadingState();
+		this.setLoadingState(true);
+		this.addUserMessage(`Generate tests${framework ? ` using ${framework}` : ''} for this code:\n\n${code}`);
 
-		try {
-			const stopwatch = StopWatch.create();
-			const tests = await this.aiAssistantService.generateTests(code, framework);
-			
-			const response: AiPanelResponse = {
+		await this.operationManager.executeOperation(
+			'generateTests',
+			() => this.aiAssistantService.generateTests(code, framework),
+			`Generate tests${framework ? ` using ${framework}` : ''} for this code:\n\n${code}`,
+			(tests) => ({
 				type: 'test',
 				content: tests,
 				codeBlocks: [tests],
 				suggestions: [],
 				timestamp: Date.now(),
-				duration: stopwatch.elapsed()
-			};
+				duration: 0
+			})
+		);
 
-			this.addMessage({
-				type: 'user',
-				content: `Generate tests${framework ? ` using ${framework}` : ''} for this code:\n\n${code}`,
-				timestamp: Date.now()
-			});
-
-			this.addMessage({
-				type: 'assistant',
-				content: tests,
-				timestamp: Date.now()
-			});
-
-			this._onResponseReceived.fire(response);
-		} catch (error) {
-			this.handleError('generateTests', error as Error);
-		} finally {
-			this._isLoading = false;
-			this.updateLoadingState();
-		}
+		this.setLoadingState(false);
 	}
 
+	/**
+	 * Reviews the given code
+	 */
 	async reviewCode(code: string): Promise<void> {
-		if (this._isLoading) {
-			return;
-		}
+		if (this.isLoading) return;
 
-		this._isLoading = true;
-		this.updateLoadingState();
+		this.setLoadingState(true);
+		this.addUserMessage(`Review this code:\n\n${code}`);
 
-		try {
-			const stopwatch = StopWatch.create();
-			const review = await this.aiAssistantService.reviewCode(code);
-			
-			const response: AiPanelResponse = {
+		await this.operationManager.executeOperation(
+			'reviewCode',
+			() => this.aiAssistantService.reviewCode(code),
+			`Review this code:\n\n${code}`,
+			(review) => ({
 				type: 'review',
 				content: review.summary,
 				codeBlocks: [],
 				suggestions: review.suggestions.map(s => s.message),
 				timestamp: Date.now(),
-				duration: stopwatch.elapsed()
-			};
+				duration: 0
+			})
+		);
 
-			this.addMessage({
-				type: 'user',
-				content: `Review this code:\n\n${code}`,
-				timestamp: Date.now()
-			});
-
-			this.addMessage({
-				type: 'assistant',
-				content: review.summary,
-				timestamp: Date.now()
-			});
-
-			this._onResponseReceived.fire(response);
-		} catch (error) {
-			this.handleError('reviewCode', error as Error);
-		} finally {
-			this._isLoading = false;
-			this.updateLoadingState();
-		}
+		this.setLoadingState(false);
 	}
 
+	/**
+	 * Optimizes performance of the given code
+	 */
 	async optimizePerformance(code: string): Promise<void> {
-		if (this._isLoading) {
-			return;
-		}
+		if (this.isLoading) return;
 
-		this._isLoading = true;
-		this.updateLoadingState();
+		this.setLoadingState(true);
+		this.addUserMessage(`Optimize performance of this code:\n\n${code}`);
 
-		try {
-			const stopwatch = StopWatch.create();
-			const optimization = await this.aiAssistantService.optimizePerformance(code);
-			
-			const response: AiPanelResponse = {
+		await this.operationManager.executeOperation(
+			'optimizePerformance',
+			() => this.aiAssistantService.optimizePerformance(code),
+			`Optimize performance of this code:\n\n${code}`,
+			(optimization) => ({
 				type: 'performance',
 				content: optimization.summary,
 				codeBlocks: [],
 				suggestions: optimization.optimizations.map(o => o.description),
 				timestamp: Date.now(),
-				duration: stopwatch.elapsed()
-			};
+				duration: 0
+			})
+		);
 
-			this.addMessage({
-				type: 'user',
-				content: `Optimize performance of this code:\n\n${code}`,
-				timestamp: Date.now()
-			});
-
-			this.addMessage({
-				type: 'assistant',
-				content: optimization.summary,
-				timestamp: Date.now()
-			});
-
-			this._onResponseReceived.fire(response);
-		} catch (error) {
-			this.handleError('optimizePerformance', error as Error);
-		} finally {
-			this._isLoading = false;
-			this.updateLoadingState();
-		}
+		this.setLoadingState(false);
 	}
 
+	/**
+	 * Analyzes security of the given code
+	 */
 	async analyzeSecurity(code: string): Promise<void> {
-		if (this._isLoading) {
-			return;
-		}
+		if (this.isLoading) return;
 
-		this._isLoading = true;
-		this.updateLoadingState();
+		this.setLoadingState(true);
+		this.addUserMessage(`Analyze security of this code:\n\n${code}`);
 
-		try {
-			const stopwatch = StopWatch.create();
-			const security = await this.aiAssistantService.analyzeSecurity(code);
-			
-			const response: AiPanelResponse = {
+		await this.operationManager.executeOperation(
+			'analyzeSecurity',
+			() => this.aiAssistantService.analyzeSecurity(code),
+			`Analyze security of this code:\n\n${code}`,
+			(security) => ({
 				type: 'security',
 				content: security.summary,
 				codeBlocks: [],
 				suggestions: security.recommendations.map(r => r.description),
 				timestamp: Date.now(),
-				duration: stopwatch.elapsed()
-			};
+				duration: 0
+			})
+		);
 
-			this.addMessage({
-				type: 'user',
-				content: `Analyze security of this code:\n\n${code}`,
-				timestamp: Date.now()
-			});
-
-			this.addMessage({
-				type: 'assistant',
-				content: security.summary,
-				timestamp: Date.now()
-			});
-
-			this._onResponseReceived.fire(response);
-		} catch (error) {
-			this.handleError('analyzeSecurity', error as Error);
-		} finally {
-			this._isLoading = false;
-			this.updateLoadingState();
-		}
+		this.setLoadingState(false);
 	}
 
+	// =============================================================================
+	// Chat Functionality
+	// =============================================================================
+
+	/**
+	 * Sends a chat message
+	 */
 	async sendMessage(message: string): Promise<void> {
-		if (this._isLoading || !message.trim()) {
+		if (this.isLoading || !message.trim()) {
 			return;
 		}
 
-		this._isLoading = true;
-		this.updateLoadingState();
+		this.setLoadingState(true);
+		this.addUserMessage(message);
 
-		try {
-			const stopwatch = StopWatch.create();
-			const response = await this.aiAssistantService.chat(message);
-			
-			const aiResponse: AiPanelResponse = {
+		await this.operationManager.executeOperation(
+			'sendMessage',
+			() => this.aiAssistantService.chat(message),
+			message,
+			(response) => ({
 				type: 'chat',
 				content: response.message,
 				codeBlocks: response.codeBlocks.map(block => block.code),
 				suggestions: response.suggestions,
 				timestamp: Date.now(),
-				duration: stopwatch.elapsed()
-			};
+				duration: 0
+			})
+		);
 
-			this.addMessage({
-				type: 'user',
-				content: message,
-				timestamp: Date.now()
-			});
-
-			this.addMessage({
-				type: 'assistant',
-				content: response.message,
-				timestamp: Date.now()
-			});
-
-			this._onMessageSent.fire(message);
-			this._onResponseReceived.fire(aiResponse);
-		} catch (error) {
-			this.handleError('sendMessage', error as Error);
-		} finally {
-			this._isLoading = false;
-			this.updateLoadingState();
-		}
+		this._onMessageSent.fire(message);
+		this.setLoadingState(false);
 	}
 
+	/**
+	 * Clears the message history
+	 */
 	clearHistory(): void {
-		this._messageHistory = [];
-		this.updateMessageHistory();
+		this.messageHistory.clearHistory();
+		this.updateMessageDisplay();
 	}
 
+	// =============================================================================
+	// Private Helper Methods
+	// =============================================================================
+
+	/**
+	 * Creates the panel with all its components
+	 */
 	private createPanel(): void {
-		if (this._container) {
-			return;
-		}
+		const container = this.renderer.createPanel();
+		
+		const header = this.renderer.createHeader(() => this.hidePanel());
+		const content = this.renderer.createContent();
+		const input = this.renderer.createInput(
+			(message) => this.sendMessage(message),
+			() => this.clearHistory()
+		);
 
-		this._container = document.createElement('div');
-		this._container.className = 'ai-panel';
-		this._container.style.cssText = `
-			position: fixed;
-			top: 0;
-			right: 0;
-			width: ${this.options.size || 400}px;
-			height: 100vh;
-			background: var(--vscode-panel-background);
-			border-left: 1px solid var(--vscode-panel-border);
-			z-index: 1000;
-			display: flex;
-			flex-direction: column;
-			font-family: var(--vscode-font-family);
-			font-size: var(--vscode-font-size);
-		`;
+		container.appendChild(header);
+		container.appendChild(content);
+		container.appendChild(input);
 
-		this.createHeader();
-		this.createContent();
-		this.createInput();
-
-		document.body.appendChild(this._container);
+		this.updateMessageDisplay();
 	}
 
-	private createHeader(): void {
-		const header = document.createElement('div');
-		header.className = 'ai-panel-header';
-		header.style.cssText = `
-			padding: 10px 15px;
-			border-bottom: 1px solid var(--vscode-panel-border);
-			display: flex;
-			justify-content: space-between;
-			align-items: center;
-			background: var(--vscode-panel-background);
-		`;
-
-		const title = document.createElement('h3');
-		title.textContent = 'AI Assistant';
-		title.style.cssText = `
-			margin: 0;
-			color: var(--vscode-foreground);
-			font-size: 14px;
-			font-weight: 600;
-		`;
-
-		const closeButton = document.createElement('button');
-		closeButton.innerHTML = '✕';
-		closeButton.style.cssText = `
-			background: none;
-			border: none;
-			color: var(--vscode-foreground);
-			cursor: pointer;
-			font-size: 16px;
-			padding: 0;
-			width: 24px;
-			height: 24px;
-			display: flex;
-			align-items: center;
-			justify-content: center;
-		`;
-		closeButton.onclick = () => this.hidePanel();
-
-		header.appendChild(title);
-		header.appendChild(closeButton);
-		this._container!.appendChild(header);
+	/**
+	 * Sets the loading state
+	 */
+	private setLoadingState(loading: boolean): void {
+		this.isLoading = loading;
+		this.updateLoadingDisplay();
 	}
 
-	private createContent(): void {
-		const content = document.createElement('div');
-		content.className = 'ai-panel-content';
-		content.style.cssText = `
-			flex: 1;
-			overflow-y: auto;
-			padding: 15px;
-			display: flex;
-			flex-direction: column;
-			gap: 15px;
-		`;
-
-		this._container!.appendChild(content);
-		this.updateMessageHistory();
-	}
-
-	private createInput(): void {
-		const inputContainer = document.createElement('div');
-		inputContainer.className = 'ai-panel-input';
-		inputContainer.style.cssText = `
-			padding: 15px;
-			border-top: 1px solid var(--vscode-panel-border);
-			background: var(--vscode-panel-background);
-		`;
-
-		const input = document.createElement('textarea');
-		input.placeholder = 'Ask me anything about your code...';
-		input.style.cssText = `
-			width: 100%;
-			min-height: 60px;
-			padding: 8px 12px;
-			border: 1px solid var(--vscode-input-border);
-			border-radius: 4px;
-			background: var(--vscode-input-background);
-			color: var(--vscode-input-foreground);
-			font-family: inherit;
-			font-size: inherit;
-			resize: vertical;
-			outline: none;
-		`;
-
-		input.addEventListener('keydown', (e) => {
-			if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-				e.preventDefault();
-				this.sendMessage(input.value);
-				input.value = '';
-			}
+	/**
+	 * Adds a user message to the history
+	 */
+	private addUserMessage(content: string): void {
+		this.messageHistory.addMessage({
+			type: 'user',
+			content,
+			timestamp: Date.now()
 		});
-
-		const buttonContainer = document.createElement('div');
-		buttonContainer.style.cssText = `
-			display: flex;
-			gap: 8px;
-			margin-top: 8px;
-		`;
-
-		const sendButton = document.createElement('button');
-		sendButton.textContent = 'Send';
-		sendButton.style.cssText = `
-			padding: 6px 12px;
-			background: var(--vscode-button-background);
-			color: var(--vscode-button-foreground);
-			border: none;
-			border-radius: 4px;
-			cursor: pointer;
-			font-size: inherit;
-		`;
-		sendButton.onclick = () => {
-			this.sendMessage(input.value);
-			input.value = '';
-		};
-
-		const clearButton = document.createElement('button');
-		clearButton.textContent = 'Clear';
-		clearButton.style.cssText = `
-			padding: 6px 12px;
-			background: var(--vscode-button-secondaryBackground);
-			color: var(--vscode-button-secondaryForeground);
-			border: none;
-			border-radius: 4px;
-			cursor: pointer;
-			font-size: inherit;
-		`;
-		clearButton.onclick = () => this.clearHistory();
-
-		buttonContainer.appendChild(sendButton);
-		buttonContainer.appendChild(clearButton);
-		inputContainer.appendChild(input);
-		inputContainer.appendChild(buttonContainer);
-		this._container!.appendChild(inputContainer);
+		this.updateMessageDisplay();
 	}
 
-	private destroyPanel(): void {
-		if (this._container) {
-			this._container.remove();
-			this._container = undefined;
-		}
-	}
-
-	private addMessage(message: AiPanelMessage): void {
-		this._messageHistory.push(message);
-		this.updateMessageHistory();
-	}
-
-	private updateMessageHistory(): void {
-		if (!this._container) {
-			return;
-		}
-
-		const content = this._container.querySelector('.ai-panel-content') as HTMLElement;
-		if (!content) {
-			return;
-		}
-
-		content.innerHTML = '';
-
-		this._messageHistory.forEach(message => {
-			const messageElement = this.createMessageElement(message);
-			content.appendChild(messageElement);
+	/**
+	 * Adds an assistant message to the history
+	 */
+	private addAssistantMessage(content: string): void {
+		this.messageHistory.addMessage({
+			type: 'assistant',
+			content,
+			timestamp: Date.now()
 		});
-
-		content.scrollTop = content.scrollHeight;
+		this.updateMessageDisplay();
 	}
 
-	private createMessageElement(message: AiPanelMessage): HTMLElement {
-		const messageContainer = document.createElement('div');
-		messageContainer.className = `ai-message ai-message-${message.type}`;
-		messageContainer.style.cssText = `
-			padding: 10px;
-			border-radius: 8px;
-			margin-bottom: 10px;
-			max-width: 100%;
-			word-wrap: break-word;
-		`;
-
-		if (message.type === 'user') {
-			messageContainer.style.cssText += `
-				background: var(--vscode-button-background);
-				color: var(--vscode-button-foreground);
-				margin-left: 20px;
-			`;
-		} else {
-			messageContainer.style.cssText += `
-				background: var(--vscode-editor-background);
-				color: var(--vscode-foreground);
-				border: 1px solid var(--vscode-panel-border);
-				margin-right: 20px;
-			`;
-		}
-
-		const content = document.createElement('div');
-		content.innerHTML = this.formatMessageContent(message.content);
-		content.style.cssText = `
-			line-height: 1.4;
-			white-space: pre-wrap;
-		`;
-
-		const timestamp = document.createElement('div');
-		timestamp.textContent = new Date(message.timestamp).toLocaleTimeString();
-		timestamp.style.cssText = `
-			font-size: 11px;
-			color: var(--vscode-descriptionForeground);
-			margin-top: 4px;
-			text-align: right;
-		`;
-
-		messageContainer.appendChild(content);
-		messageContainer.appendChild(timestamp);
-
-		return messageContainer;
-	}
-
-	private formatMessageContent(content: string): string {
-		// Simple markdown-like formatting
-		return content
-			.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-			.replace(/\*(.*?)\*/g, '<em>$1</em>')
-			.replace(/`(.*?)`/g, '<code>$1</code>')
-			.replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
-	}
-
-	private updateLoadingState(): void {
-		if (!this._container) {
-			return;
-		}
-
-		const content = this._container.querySelector('.ai-panel-content') as HTMLElement;
-		if (!content) {
-			return;
-		}
-
-		const loadingElement = content.querySelector('.ai-loading');
-		if (this._isLoading && !loadingElement) {
-			const loading = document.createElement('div');
-			loading.className = 'ai-loading';
-			loading.innerHTML = `
-				<div style="display: flex; align-items: center; gap: 8px; padding: 10px;">
-					<div style="width: 16px; height: 16px; border: 2px solid var(--vscode-progressBar-background); border-top: 2px solid transparent; border-radius: 50%; animation: spin 1s linear infinite;"></div>
-					<span>AI is thinking...</span>
-				</div>
-			`;
-			loading.style.cssText = `
-				background: var(--vscode-editor-background);
-				border: 1px solid var(--vscode-panel-border);
-				border-radius: 8px;
-				margin: 10px 0;
-			`;
-			content.appendChild(loading);
-		} else if (!this._isLoading && loadingElement) {
-			loadingElement.remove();
+	/**
+	 * Updates the message display
+	 */
+	private updateMessageDisplay(): void {
+		const container = document.querySelector('.ai-panel-content') as HTMLElement;
+		if (container) {
+			this.renderer.updateMessageHistory(container, this.messageHistory.getMessages());
 		}
 	}
 
+	/**
+	 * Updates the loading display
+	 */
+	private updateLoadingDisplay(): void {
+		const container = document.querySelector('.ai-panel-content') as HTMLElement;
+		if (container) {
+			this.renderer.updateLoadingState(container, this.isLoading);
+		}
+	}
+
+	/**
+	 * Handles assistant response events
+	 */
 	private handleAssistantResponse(event: any): void {
-		// Handle assistant response events
 		this.logService.trace('[AiPanelWidget] Assistant response received:', event);
 	}
 
+	/**
+	 * Handles assistant error events
+	 */
 	private handleAssistantError(event: any): void {
-		// Handle assistant error events
 		this.logService.error('[AiPanelWidget] Assistant error:', event);
 		this.handleError(event.context, event.error);
 	}
 
+	/**
+	 * Handles errors
+	 */
 	private handleError(context: string, error: Error): void {
 		this._onError.fire({
 			message: error.message,
@@ -791,16 +967,6 @@ export class AiPanelWidget extends Disposable implements IAiPanelService {
 			timestamp: Date.now()
 		});
 
-		this.addMessage({
-			type: 'assistant',
-			content: `Sorry, I encountered an error: ${error.message}`,
-			timestamp: Date.now()
-		});
+		this.addAssistantMessage(`Sorry, I encountered an error: ${error.message}`);
 	}
-}
-
-interface AiPanelMessage {
-	type: 'user' | 'assistant';
-	content: string;
-	timestamp: number;
 }
